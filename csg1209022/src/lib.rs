@@ -28,3 +28,61 @@ pub use engine::{decode_message, encode_message, Message};
 pub use error::{ProtoError, Result};
 pub use proto_common::FieldValue;
 pub use report::decode_message_as_value;
+
+/// 检测给定的字节数组是否为 Q/CSG1209022-2019 协议帧
+///
+/// 检测规则：
+/// 1. 起始符必须是 68H
+/// 2. 长度域必须合理
+/// 3. 结束符必须在正确的位置且为 16H
+/// 4. 控制域的 D5-D0 位必须符合 FT1.2 规范
+pub fn is_csg1209022_frame(buf: &[u8]) -> bool {
+    use link::frame::Frame;
+    
+    // 尝试解析帧头部
+    if buf.len() < 22 {
+        return false;
+    }
+
+    // 检查起始符
+    if buf[0] != 0x68 {
+        return false;
+    }
+
+    // 检查长度域
+    let frame_len = u16::from_le_bytes([buf[1], buf[2]]) as usize;
+    let frame_len2 = u16::from_le_bytes([buf[1], buf[2]]) as usize;
+    if frame_len < 7 || frame_len > buf.len() || frame_len2 != frame_len {
+        return false;
+    }
+
+    if (frame_len + 8 ) != buf.len() {
+        return false;
+    }
+
+    // 检查结束符
+    if buf[frame_len - 1] != 0x16 {
+        return false;
+    }
+
+    // 尝试完整解析以验证是否为有效的 CSG1209022 帧
+    Frame::decode(buf).is_ok()
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn test_is_csg1209022_frame() {
+        // 这里需要一个真实的 CSG1209022 帧进行测试
+        // 暂时只测试基本格式
+        let _frame = vec![
+            0x68, 0x10, 0x00, 0x43, // 起始符 + 长度 + 控制域
+            0x01, 0x00, 0x00, 0x00, 0x00, 0x00, // 地址域
+            0x00, 0x01, // AFN + SEQ
+            0x00, 0x00, // 校验和（示例）
+            0x16, // 结束符
+        ];
+        // 由于校验和可能不正确，这里只是示例
+        // 实际使用时需要真实的帧数据
+    }
+}

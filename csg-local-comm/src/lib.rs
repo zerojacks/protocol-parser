@@ -47,3 +47,82 @@ pub use engine::{decode_message, encode_message, Message};
 pub use error::{Error, Result};
 pub use link::{Address, Frame};
 pub use proto_common::FieldValue;
+
+/// 检测给定的字节数组是否为 Q/CSG1209021-2019 协议帧
+///
+/// 检测规则：
+/// 1. 起始符必须是 68H
+/// 2. 长度域必须合理（至少包含基本帧结构）
+/// 3. 结束符必须在正确的位置且为 16H
+/// 4. 控制字节的版本位必须为 0
+pub fn is_csg_local_comm_frame(buf: &[u8]) -> bool {
+    // 最小长度检查：68H + L(2B) + C(1B) + payload(至少1B) + CS(1B) + 16H = 7字节
+    if buf.len() < 7 {
+        return false;
+    }
+
+    // 检查起始符
+    if buf[0] != 0x68 {
+        return false;
+    }
+
+    // 检查长度域
+    let frame_len = u16::from_le_bytes([buf[1], buf[2]]) as usize;
+    if frame_len < 7 || frame_len > buf.len() {
+        return false;
+    }
+
+    // 检查结束符位置
+    if buf[frame_len - 1] != 0x16 {
+        return false;
+    }
+
+    // 检查控制字节的版本位（D4-D3 必须为 00）
+    let control = buf[3];
+    let version = (control >> 3) & 0x03;
+    if version != 0 {
+        return false;
+    }
+
+    // 检查保留位（D2-D0 必须为 000）
+    let reserved = control & 0x07;
+    if reserved != 0 {
+        return false;
+    }
+
+    true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_csg_local_comm_frame_valid() {
+        // 构造一个有效的 CSG 本地通信帧
+        let frame = vec![
+            0x68, 0x0C, 0x00, 0x80, // 起始符 + 长度 + 控制字
+            0x00, 0x01, 0x01, 0x00, 0x01, 0xE8, // AFN + SEQ + DI
+            0x6B, 0x16, // 校验和 + 结束符
+        ];
+        assert!(is_csg_local_comm_frame(&frame));
+    }
+
+    #[test]
+    fn test_is_csg_local_comm_frame_wrong_start() {
+        let frame = vec![0x69, 0x0C, 0x00, 0x80, 0x00, 0x01, 0x6B, 0x16];
+        assert!(!is_csg_local_comm_frame(&frame));
+    }
+
+    #[test]
+    fn test_is_csg_local_comm_frame_wrong_end() {
+        let frame = vec![0x68, 0x08, 0x00, 0x80, 0x00, 0x01, 0x6B, 0x17];
+        assert!(!is_csg_local_comm_frame(&frame));
+    }
+
+    #[test]
+    fn test_is_csg_local_comm_frame_too_short() {
+        let frame = vec![0x68, 0x0C, 0x00];
+        assert!(!is_csg_local_comm_frame(&frame));
+    }
+}

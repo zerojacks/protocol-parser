@@ -5,6 +5,7 @@ members = [
     "csg-local-comm",
     "csg1209022",
     "dlt645-2007",
+    "parser",
 ]
 
 # 所有成员 crate 共享的元数据/依赖版本，各成员用 `xxx.workspace = true` 继承，

@@ -1,0 +1,21 @@
+[package]
+name = "protocol-parser"
+version = "0.1.0"
+edition = "2021"
+authors = ["Protocol Parser Contributors"]
+description = "统一的多协议解析器，自动检测并解析 DLT645-2007、CSG1209022、CSG-Local-Comm 等协议"
+license = "MIT"
+
+[dependencies]
+# 各协议解析器
+dlt645-2007 = { path = "../dlt645-2007" }
+csg1209022 = { path = "../csg1209022" }
+csg-local-comm = { path = "../csg-local-comm" }
+
+# 共享的字段值类型
+proto-common = { path = "../common", features = ["spec-engine-support"] }
+
+# 错误处理
+thiserror = { workspace = true }
+
+[dev-dependencies]

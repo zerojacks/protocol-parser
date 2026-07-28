@@ -82,6 +82,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "protocol-parser"
+version = "0.1.0"
+dependencies = [
+ "csg-local-comm",
+ "csg1209022",
+ "dlt645-2007",
+ "proto-common",
+ "thiserror",
+]
+
+[[package]]
 name = "quote"
 version = "1.0.47"
 source = "registry+https://github.com/rust-lang/crates.io-index"

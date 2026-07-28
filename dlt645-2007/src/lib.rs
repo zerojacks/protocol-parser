@@ -51,10 +51,11 @@ pub mod report;
 
 pub use address::Address;
 pub use app::{ApplicationBody, ApplicationLayer, BroadcastTimeData, DataItem, FreezeTime};
-pub use control::{ControlCode, Direction, FunctionCode, SlaveStatus};
+pub use control::{ControlCode, Direction, FunctionCode};
 pub use data_identifier::DataIdentifier;
 pub use engine::{decode_message, encode_message, Message};
 pub use error::{Error, Result};
+pub use link::Frame;
 pub use proto_common::FieldValue;
 
 /// DL/T 645-2007 协议版本标识
@@ -77,3 +78,92 @@ pub const BROADCAST_ADDRESS: &str = "999999999999";
 
 /// 通配符字节（用于地址的"不关心"匹配）
 pub const WILDCARD_BYTE: u8 = 0xAA;
+
+/// 检测给定的字节数组是否为 DL/T 645-2007 协议帧
+///
+/// 检测规则：
+/// 1. 起始符必须是 68H（可能有前导 FE）
+/// 2. 地址域后必须有第二个 68H
+/// 3. 结束符必须为 16H
+/// 4. 数据长度域必须合理
+pub fn is_dlt645_frame(buf: &[u8]) -> bool {
+    // 跳过可能的前导字节 FE
+    let mut start = 0;
+    while start < buf.len() && buf[start] == 0xFE {
+        start += 1;
+    }
+
+    // 最小长度：68H + A(6B) + 68H + C + L + CS + 16H = 12字节
+    if buf.len() - start < 12 {
+        return false;
+    }
+
+    // 检查第一个起始符
+    if buf[start] != 0x68 {
+        return false;
+    }
+
+    // 检查第二个起始符（地址域后）
+    if buf[start + 7] != 0x68 {
+        return false;
+    }
+
+    // 检查数据长度
+    let data_len = buf[start + 9] as usize;
+    let expected_frame_len = 12 + data_len;
+    
+    if buf.len() - start < expected_frame_len {
+        return false;
+    }
+
+    // 检查结束符
+    if buf[start + expected_frame_len - 1] != 0x16 {
+        return false;
+    }
+
+    true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_dlt645_frame_valid() {
+        // 构造一个基本的 DLT645 帧
+        let frame = vec![
+            0x68, // 起始符
+            0x12, 0x90, 0x78, 0x56, 0x34, 0x12, // 地址域
+            0x68, // 第二个起始符
+            0x11, // 控制码
+            0x04, // 数据长度
+            0x33, 0x33, 0x34, 0x33, // 数据域（+33H后）
+            0xEB, // 校验和
+            0x16, // 结束符
+        ];
+        assert!(is_dlt645_frame(&frame));
+    }
+
+    #[test]
+    fn test_is_dlt645_frame_with_preamble() {
+        // 带前导字节的帧
+        let frame = vec![
+            0xFE, 0xFE, 0xFE, 0xFE, // 前导字节
+            0x68, // 起始符
+            0x12, 0x90, 0x78, 0x56, 0x34, 0x12, // 地址域
+            0x68, // 第二个起始符
+            0x11, 0x04, 0x33, 0x33, 0x34, 0x33, 0xEB, 0x16,
+        ];
+        assert!(is_dlt645_frame(&frame));
+    }
+
+    #[test]
+    fn test_is_dlt645_frame_wrong_second_start() {
+        let frame = vec![
+            0x68, 0x12, 0x90, 0x78, 0x56, 0x34, 0x12,
+            0x69, // 错误的第二个起始符
+            0x11, 0x04, 0x33, 0x33, 0x34, 0x33, 0xEB, 0x16,
+        ];
+        assert!(!is_dlt645_frame(&frame));
+    }
+}
