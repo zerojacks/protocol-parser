@@ -1,0 +1,31 @@
+[workspace]
+resolver = "2"
+members = [
+    "common",
+    "csg-local-comm",
+    "csg1209022",
+    "dlt645-2007",
+]
+
+# 所有成员 crate 共享的元数据/依赖版本，各成员用 `xxx.workspace = true` 继承，
+# 避免多个协议 crate 各自锁一份版本号导致 Cargo.lock 分裂。
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+authors = ["zerojacks"]
+license = "MIT"
+repository = "https://github.com/zerojacks/protocol-parser"
+homepage = "https://github.com/zerojacks/protocol-parser"
+
+[workspace.dependencies]
+thiserror = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# 内容层单独维护、单独发布，这里只作为普通依赖引用，锁定到具体 commit，
+# 后续 spec-engine 打 tag/发布到 crates.io 后切换为版本号依赖。
+spec-engine = { path = "../spec-engine" }
+
+[profile.release]
+lto = true

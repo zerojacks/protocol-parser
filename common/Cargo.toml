@@ -1,0 +1,21 @@
+[package]
+name = "proto-common"
+description = "电力计量通信协议解析器共享的极薄工具函数（校验和、BCD编解码），不承载任何协议语义"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
+keywords = ["metering", "protocol", "bcd", "checksum"]
+categories = ["parsing", "encoding"]
+
+[dependencies]
+thiserror.workspace = true
+spec-engine = { workspace = true, optional = true }
+
+[features]
+default = []
+spec-engine-support = ["spec-engine"]

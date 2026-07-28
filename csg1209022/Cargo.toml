@@ -1,0 +1,25 @@
+[package]
+name = "csg1209022"
+description = "中国南方电网《计量自动化终端上行通信规约》（Q/CSG1209022-2019）帧层/链路层/应用层解析器"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
+keywords = ["csg", "metering", "protocol", "ft1.2", "southern-grid"]
+categories = ["parsing", "encoding", "network-programming"]
+include = [
+    "src/**",
+    "README.md",
+    "LICENSE",
+]
+
+[dependencies]
+thiserror.workspace = true
+proto-common = { path = "../common", version = "0.1.0", features = ["spec-engine-support"] }
+spec-engine.workspace = true
+
+[dev-dependencies]

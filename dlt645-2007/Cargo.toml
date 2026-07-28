@@ -1,0 +1,28 @@
+[package]
+name = "dlt645-2007"
+version = "0.1.0"
+edition = "2021"
+authors = ["Protocol Parser Contributors"]
+description = "DL/T 645-2007 多功能电能表通信协议解析器"
+license = "MIT"
+
+[dependencies]
+# BCD 编码和校验和工具，以及 spec-engine 支持的 FieldValue
+proto-common = { path = "../common", features = ["spec-engine-support"] }
+
+# spec-engine 用于解析数据标识内容
+spec-engine = { workspace = true }
+
+[dev-dependencies]
+
+[features]
+default = []
+# spec-engine-support = ["spec-engine"]
+
+[[example]]
+name = "simple_parse"
+path = "examples/simple_parse.rs"
+
+[[example]]
+name = "parse_real_frame"
+path = "examples/parse_real_frame.rs"

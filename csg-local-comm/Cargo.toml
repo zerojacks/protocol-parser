@@ -1,0 +1,23 @@
+[package]
+name = "csg-local-comm"
+version = "0.1.0"
+edition = "2021"
+authors = ["Protocol Parser Contributors"]
+description = "Q/CSG1209021-2019 计量自动化终端本地通信模块接口协议解析器"
+license = "MIT"
+
+[dependencies]
+# 共享的 BCD、校验和工具，以及 spec-engine 支持的 FieldValue
+proto-common = { path = "../common", features = ["spec-engine-support"] }
+
+# spec-engine 用于解析数据标识内容
+spec-engine = { workspace = true }
+
+[dev-dependencies]
+
+[features]
+default = []
+
+[[example]]
+name = "parse_real_frame"
+path = "examples/parse_real_frame.rs"
