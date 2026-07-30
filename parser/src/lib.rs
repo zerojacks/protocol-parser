@@ -20,8 +20,10 @@
 //! }
 //! ```
 
-use proto_common::FieldValue;
 use thiserror::Error;
+
+// 重新导出 proto_common 的类型，让下游只需依赖 protocol-parser
+pub use proto_common::FieldValue;
 
 /// 协议类型枚举
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -83,13 +85,13 @@ impl ParsedMessage {
     /// 转换为树形结构（用于前端展示）
     pub fn to_value_tree(&self) -> Result<FieldValue, ParseError> {
         match self {
-            ParsedMessage::Dlt645(_msg) => {
-                // 需要原始字节来渲染，这里暂时返回基本信息
-                // 实际使用时可能需要保存原始字节
-                Err(ParseError::NotImplemented("DLT645 to_value_tree 需要原始字节".to_string()))
+            ParsedMessage::Dlt645(msg) => {
+                msg.to_value_tree()
+                    .map_err(|e| ParseError::RenderError(format!("{:?}", e)))
             }
-            ParsedMessage::Csg1209022(_msg) => {
-                Err(ParseError::NotImplemented("CSG1209022 to_value_tree 需要原始字节".to_string()))
+            ParsedMessage::Csg1209022(msg) => {
+                msg.to_value_tree()
+                    .map_err(|e| ParseError::RenderError(format!("{:?}", e)))
             }
             ParsedMessage::CsgLocalComm(msg) => {
                 csg_local_comm::report::render_message_as_value(msg)

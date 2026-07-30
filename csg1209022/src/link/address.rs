@@ -30,6 +30,15 @@ pub struct RegionCode {
 
 impl RegionCode {
     fn decode(bytes: [u8; 3]) -> Result<Self> {
+        if bytes == [0xFF, 0xFF, 0xFF] {
+            // 全 FF 表示全区域
+            return Ok(Self {
+                province: 0xFF,
+                city: 0xFF,
+                county: 0xFF,
+            });
+        }
+
         // 传输顺序：区县(低字节) 在前，地市，省份(高字节) 在后
         let county = proto_common::bcd::decode(&[bytes[0]])? as u8;
         let city = proto_common::bcd::decode(&[bytes[1]])? as u8;
@@ -42,6 +51,11 @@ impl RegionCode {
     }
 
     fn encode(self) -> Result<[u8; 3]> {
+        if self.province == 0xFF && self.city == 0xFF && self.county == 0xFF {
+            // 全 FF 表示全区域
+            return Ok([0xFF, 0xFF, 0xFF]);
+        }
+        
         let county = proto_common::bcd::encode(self.county as u64, 1)
             .ok_or(ProtoError::OutOfRange(self.county as u32))?[0];
         let city = proto_common::bcd::encode(self.city as u64, 1)
@@ -69,10 +83,28 @@ impl AddressField {
                 actual: buf.len(),
             });
         }
-        let region = RegionCode::decode([buf[0], buf[1], buf[2]])?;
-        // A2 三字节 BIN，低字节在前
+        
+        // 检查终端地址是否为广播地址（A2 = FFFFFF）
         let terminal_addr =
             buf[3] as u32 | (buf[4] as u32) << 8 | (buf[5] as u32) << 16;
+        
+        if terminal_addr == TERMINAL_ADDR_BROADCAST {
+            // 广播地址：区域码使用 FF FF FF 表示全区域
+            return Ok((
+                Self {
+                    region: RegionCode {
+                        province: 0xFF,
+                        city: 0xFF,
+                        county: 0xFF,
+                    },
+                    terminal_addr: TERMINAL_ADDR_BROADCAST,
+                    master_addr: buf[6],
+                },
+                ADDRESS_LEN,
+            ));
+        }
+        
+        let region = RegionCode::decode([buf[0], buf[1], buf[2]])?;
         let master_addr = buf[6];
         Ok((
             Self {
@@ -85,6 +117,20 @@ impl AddressField {
     }
 
     pub fn encode(&self) -> Result<[u8; ADDRESS_LEN]> {
+        // 检查是否为广播地址（终端地址 = FFFFFF）
+        if self.is_broadcast() {
+            // 广播地址：区域码用 FF FF FF，主站地址正常编码
+            return Ok([
+                0xFF,
+                0xFF,
+                0xFF,
+                0xFF,
+                0xFF,
+                0xFF,
+                self.master_addr,
+            ]);
+        }
+        
         let region_bytes = self.region.encode()?;
         let [a2_0, a2_1, a2_2] = [
             (self.terminal_addr & 0xFF) as u8,
@@ -137,6 +183,23 @@ mod tests {
         let bytes = [0x05, 0x01, 0x44, 0xFF, 0xFF, 0xFF, 0x00];
         let (decoded, _) = AddressField::decode(&bytes).unwrap();
         assert!(decoded.is_broadcast());
+    }
+
+    #[test]
+    fn full_broadcast_address() {
+        // 全 FF 广播地址（地址域 + 终端地址 + 主站地址）
+        let bytes = [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF];
+        let (decoded, consumed) = AddressField::decode(&bytes).unwrap();
+        assert_eq!(consumed, ADDRESS_LEN);
+        assert!(decoded.is_broadcast());
+        assert_eq!(decoded.region.province, 0xFF);
+        assert_eq!(decoded.region.city, 0xFF);
+        assert_eq!(decoded.region.county, 0xFF);
+        assert_eq!(decoded.master_addr, 0xFF);
+        
+        // 测试编码回去也是全 FF
+        let encoded = decoded.encode().unwrap();
+        assert_eq!(encoded, [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]);
     }
 
     #[test]

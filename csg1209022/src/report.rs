@@ -40,7 +40,7 @@ use crate::link::{AddressField, Frame};
 
 /// 解析一条完整报文并渲染成一棵 `Value` 树，返回渲染结果和消耗的字节数。
 ///
-/// 根节点 `name` 固定为 `"报文"`，`raw` 是整条报文的原始字节，`value` 是按标准顺序
+/// 根节点 `name` 固定为 `"Q/CSG1209022-2019 报文"`，`raw` 是整条报文的原始字节，`value` 是按标准顺序
 /// 排列的字段列表（`Value::List`）：起始符/长度/起始符/控制域/地址域/AFN/SEQ/信息体/
 /// [时间标签]/校验码/结束符。
 pub fn decode_message_as_value(
@@ -53,14 +53,17 @@ pub fn decode_message_as_value(
         ApplicationLayer::decode(&frame.payload, frame.control.direction, protocol, region)?;
     
     let msg = Message { frame, application };
-    let tree = render_message_as_value(&msg, &buf[..consumed])?;
+    let tree = render_message_as_value(&msg)?;
     Ok((tree, consumed))
 }
 
 /// 将已解析的 Message 渲染成一棵 `Value` 树
 ///
 /// 这是 `Message::to_value_tree()` 的内部实现函数。
-pub fn render_message_as_value(msg: &Message, raw_bytes: &[u8]) -> Result<Value> {
+pub fn render_message_as_value(msg: &Message) -> Result<Value> {
+    // 从 Message 对象重新编码生成原始字节
+    let raw_bytes = msg.frame.encode()?;
+    
     let mut rows = Vec::new();
 
     rows.push(leaf("起始符", vec![raw_bytes[0]], "起始符".to_string()));
@@ -99,8 +102,8 @@ pub fn render_message_as_value(msg: &Message, raw_bytes: &[u8]) -> Result<Value>
     rows.push(leaf("结束符", vec![raw_bytes[raw_bytes.len() - 1]], "结束符".to_string()));
 
     Ok(Value::Node {
-        name: "报文".to_string(),
-        raw: raw_bytes.to_vec(),
+        name: "Q/CSG1209022-2019 报文".to_string(),
+        raw: raw_bytes.clone(),
         value: Box::new(Value::List(rows)),
     })
 }

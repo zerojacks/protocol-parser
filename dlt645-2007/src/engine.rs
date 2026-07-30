@@ -20,23 +20,19 @@ pub struct Message {
 impl Message {
     /// 将报文渲染成树形 FieldValue 结构，适合前端 UI 展示
     ///
-    /// # 参数
-    ///
-    /// - `raw_bytes`: 原始报文字节（包含完整帧）
-    ///
     /// # 返回
     ///
-    /// 根节点为 "报文" 的 FieldValue 树，包含所有字段的 name/raw/value 信息
+    /// 根节点为 "DL/T 645-2007 报文" 的 FieldValue 树，包含所有字段的 name/raw/value 信息
     ///
     /// # 示例
     ///
     /// ```rust,ignore
     /// let (msg, consumed) = decode_message(&bytes, "dlt645-2007", "南网")?;
-    /// let tree = msg.to_value_tree(&bytes[..consumed])?;
+    /// let tree = msg.to_value_tree()?;
     /// // 现在可以序列化 tree 发送给前端，或递归遍历展示
     /// ```
-    pub fn to_value_tree(&self, raw_bytes: &[u8]) -> Result<FieldValue> {
-        crate::report::render_message_as_value(self, raw_bytes)
+    pub fn to_value_tree(&self) -> Result<FieldValue> {
+        crate::report::render_message_as_value(self)
     }
 }
 

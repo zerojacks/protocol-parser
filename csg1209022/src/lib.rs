@@ -33,26 +33,30 @@ pub use report::decode_message_as_value;
 ///
 /// 检测规则：
 /// 1. 起始符必须是 68H
-/// 2. 长度域必须合理
-/// 3. 结束符必须在正确的位置且为 16H
-/// 4. 控制域的 D5-D0 位必须符合 FT1.2 规范
+/// 2. 长度域必须合理且两次出现一致
+/// 3. 第二个起始符必须是 68H
+/// 4. 结束符必须在正确的位置且为 16H
 pub fn is_csg1209022_frame(buf: &[u8]) -> bool {
-    use link::frame::Frame;
     
-    // 尝试解析帧头部
+    // 最小长度：68H + L(2) + L(2) + 68H + C(1) + A(7) + CS(1) + 16H = 22字节
     if buf.len() < 22 {
         return false;
     }
 
     // 检查起始符
-    if buf[0] != 0x68 {
+    if buf[0] != 0x68 || buf[5] != 0x68 {
         return false;
     }
 
-    // 检查长度域
+    // 检查长度域（两次出现必须一致）
     let frame_len = u16::from_le_bytes([buf[1], buf[2]]) as usize;
-    let frame_len2 = u16::from_le_bytes([buf[1], buf[2]]) as usize;
-    if frame_len < 7 || frame_len > buf.len() || frame_len2 != frame_len {
+    let frame_len2 = u16::from_le_bytes([buf[3], buf[4]]) as usize;
+    if frame_len != frame_len2 {
+        return false;
+    }
+
+    // 检查长度合理性
+    if frame_len < 7 || frame_len > 65535 {
         return false;
     }
 
@@ -64,9 +68,7 @@ pub fn is_csg1209022_frame(buf: &[u8]) -> bool {
     if buf[frame_len - 1] != 0x16 {
         return false;
     }
-
-    // 尝试完整解析以验证是否为有效的 CSG1209022 帧
-    Frame::decode(buf).is_ok()
+    true
 }
 
 #[cfg(test)]

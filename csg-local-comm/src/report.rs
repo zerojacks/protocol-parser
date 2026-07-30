@@ -18,27 +18,12 @@ pub fn render_message_as_value(msg: &Message) -> Result<Value> {
     // 起始符 68H
     fields.push(leaf("起始符", vec![0x68], "68H".to_string()));
 
-    // 控制字
-    let control_byte = msg.frame.control.to_byte();
-    let direction_str = match msg.frame.control.direction {
-        crate::control::Direction::Downlink => "下行",
-        crate::control::Direction::Uplink => "上行",
-    };
-    fields.push(leaf(
-        "控制字",
-        vec![control_byte],
-        format!("{} ({:02X}H)", direction_str, control_byte),
-    ));
+    // 控制字（展开位域）
+    fields.push(control_byte_node(&msg.frame.control));
 
     // 地址域（如果存在，12字节）
     if let Some(ref addr) = msg.frame.address {
-        let addr_bytes = addr.encode();
-        let addr_desc = if addr.source.is_broadcast() || addr.destination.is_broadcast() {
-            "广播地址".to_string()
-        } else {
-            format!("源地址:{:?}, 目标地址:{:?}", addr.source, addr.destination)
-        };
-        fields.push(leaf("地址域", addr_bytes.to_vec(), addr_desc));
+        fields.push(address_domain_node(addr));
     }
 
     // AFN（应用功能码）
@@ -52,15 +37,8 @@ pub fn render_message_as_value(msg: &Message) -> Result<Value> {
     // SEQ（帧序号）
     fields.push(leaf("SEQ", vec![msg.app.seq], format!("{}", msg.app.seq)));
 
-    // DI（数据标识，4字节）
-    let di_bytes = msg.app.di.to_bytes();
-    let di_desc = format!(
-        "DI={:08X}H (角色:{:?}, 方向:{:?})",
-        msg.app.di.to_u32(),
-        msg.app.di.node_role,
-        msg.app.di.direction
-    );
-    fields.push(leaf("DI", di_bytes.to_vec(), di_desc));
+    // DI（数据标识，4字节）- 展开显示
+    fields.push(di_node(&msg.app.di));
 
     // 数据内容
     match &msg.app.body {
@@ -117,6 +95,151 @@ fn leaf(name: &str, raw: Vec<u8>, desc: String) -> Value {
         raw,
         value: Box::new(Value::Str(desc)),
     }
+}
+
+/// 控制字节节点：展开显示位域
+fn control_byte_node(ctrl: &crate::control::ControlByte) -> Value {
+    let byte = ctrl.to_byte();
+    
+    let mut bits = Vec::new();
+    
+    // D7: 传输方向
+    let dir_desc = match ctrl.direction {
+        crate::control::Direction::Downlink => "下行(集中器→模块)",
+        crate::control::Direction::Uplink => "上行(模块→集中器)",
+    };
+    bits.push(bit_node("D7传输方向位DIR", 7, 7, byte, dir_desc.to_string()));
+    
+    // D6: 启动标志
+    let prm_desc = if ctrl.is_primary {
+        "启动站发出"
+    } else {
+        "从动站发出"
+    };
+    bits.push(bit_node("D6启动标志位PRM", 6, 6, byte, prm_desc.to_string()));
+    
+    // D5: 地址域标志
+    let add_desc = if ctrl.has_address {
+        "包含地址域"
+    } else {
+        "无地址域"
+    };
+    bits.push(bit_node("D5地址域标志ADD", 5, 5, byte, add_desc.to_string()));
+    
+    // D4-D3: 协议版本
+    bits.push(bit_node("D4~D3协议版本VER", 4, 3, byte, format!("版本={}", ctrl.version)));
+    
+    // D2-D0: 保留位
+    bits.push(bit_node("D2~D0保留位", 2, 0, byte, "保留(固定为0)".to_string()));
+    
+    Value::Node {
+        name: "控制字".to_string(),
+        raw: vec![byte],
+        value: Box::new(Value::List(bits)),
+    }
+}
+
+/// 地址域节点：展开显示源地址和目标地址
+fn address_domain_node(addr: &crate::link::AddressDomain) -> Value {
+    let addr_bytes = addr.encode();
+    
+    let mut children = Vec::new();
+    
+    // 源地址 (前6字节)
+    let source_desc = if addr.source.is_broadcast() {
+        "广播地址(FFFFFFFFFFFF)".to_string()
+    } else {
+        format!("源地址={:02X}{:02X}{:02X}{:02X}{:02X}{:02X}",
+                addr_bytes[0], addr_bytes[1], addr_bytes[2],
+                addr_bytes[3], addr_bytes[4], addr_bytes[5])
+    };
+    children.push(leaf("源地址", addr_bytes[0..6].to_vec(), source_desc));
+    
+    // 目标地址 (后6字节)
+    let dest_desc = if addr.destination.is_broadcast() {
+        "广播地址(FFFFFFFFFFFF)".to_string()
+    } else {
+        format!("目标地址={:02X}{:02X}{:02X}{:02X}{:02X}{:02X}",
+                addr_bytes[6], addr_bytes[7], addr_bytes[8],
+                addr_bytes[9], addr_bytes[10], addr_bytes[11])
+    };
+    children.push(leaf("目标地址", addr_bytes[6..12].to_vec(), dest_desc));
+    
+    Value::Node {
+        name: "地址域".to_string(),
+        raw: addr_bytes.to_vec(),
+        value: Box::new(Value::List(children)),
+    }
+}
+
+/// DI（数据标识）节点：展开显示各个字段（中文输出）
+fn di_node(di: &crate::app::DataIdentifier) -> Value {
+    let di_bytes = di.to_bytes();
+    
+    let mut children = Vec::new();
+    
+    // 节点角色 (中文)
+    let role_desc = match di.node_role {
+        crate::app::di::NodeRole::Concentrator => "集中器".to_string(),
+        crate::app::di::NodeRole::Collector => "采集器".to_string(),
+        crate::app::di::NodeRole::Other(byte) => format!("其他(0x{:02X})", byte),
+    };
+    children.push(leaf("节点角色", vec![], role_desc));
+    
+    // 消息方向 (中文)
+    let direction_desc = match di.direction {
+        crate::app::di::MessageDirection::BothNoDownlinkData => "上下行都用,下行无数据内容".to_string(),
+        crate::app::di::MessageDirection::BothSameFormat => "上下行都用,数据内容格式相同".to_string(),
+        crate::app::di::MessageDirection::DownlinkOnlyAckResponse => "仅下行,对应上行为确认/否认".to_string(),
+        crate::app::di::MessageDirection::DownlinkWithData => "仅下行,带数据".to_string(),
+        crate::app::di::MessageDirection::UplinkWithData => "仅上行,带数据".to_string(),
+        crate::app::di::MessageDirection::UplinkOnlyAckResponse => "仅上行,对应下行为确认/否认".to_string(),
+        crate::app::di::MessageDirection::BothNoUplinkData => "上下行都用,上行无数据内容".to_string(),
+        crate::app::di::MessageDirection::Other(byte) => format!("其他(0x{:02X})", byte),
+    };
+    children.push(leaf("消息方向", vec![], direction_desc));
+    
+    // AFN 匹配
+    children.push(leaf(
+        "AFN匹配",
+        vec![],
+        format!("AFN={:02X}H", di.afn_match),
+    ));
+    
+    // 子功能
+    children.push(leaf(
+        "子功能",
+        vec![],
+        format!("0x{:02X}", di.sub_function),
+    ));
+    
+    Value::Node {
+        name: "DI".to_string(),
+        raw: di_bytes.to_vec(),
+        value: Box::new(Value::List(children)),
+    }
+}
+
+/// 位字段节点
+fn bit_node(name: &str, bit_start: usize, bit_end: usize, byte: u8, desc: String) -> Value {
+    let bit_value = extract_bits(byte, bit_start, bit_end);
+    Value::Node {
+        name: name.to_string(),
+        raw: Vec::new(),
+        value: Box::new(Value::Bit {
+            bit_start,
+            bit_end,
+            bit_value,
+            bit_byte: vec![byte],
+            value: Some(Box::new(Value::Str(desc))),
+        }),
+    }
+}
+
+fn extract_bits(byte: u8, bit_start: usize, bit_end: usize) -> u64 {
+    let width = bit_start - bit_end + 1;
+    let mask: u64 = if width >= 8 { 0xFF } else { (1u64 << width) - 1 };
+    ((byte as u64) >> bit_end) & mask
 }
 
 #[cfg(test)]
