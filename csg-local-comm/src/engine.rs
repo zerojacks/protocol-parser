@@ -51,6 +51,20 @@ impl Message {
         // 3. 编码链路层
         frame.encode()
     }
+
+    /// 将报文渲染成树形 FieldValue 结构，适合前端 UI 展示
+    ///
+    /// # 参数
+    ///
+    /// - `protocol`: 协议标识（如 "csg13", "csg16"）
+    /// - `region`: 区域标识（如 "南网"）
+    ///
+    /// # 返回
+    ///
+    /// 根节点为 "Q/CSG1209021-2019 报文" 的 FieldValue 树，包含所有字段的 name/raw/value 信息
+    pub fn to_value_tree(&self, protocol: &str, region: &str) -> Result<proto_common::FieldValue> {
+        crate::report::render_message_as_value(self, protocol, region)
+    }
 }
 
 /// 便捷函数：解码报文

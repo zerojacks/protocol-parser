@@ -151,12 +151,23 @@ dependencies = [
 ]
 
 [[package]]
-name = "spec-engine"
-version = "0.1.0"
+name = "spec-compiler"
+version = "0.2.0"
 dependencies = [
  "bincode",
  "serde",
  "serde_yaml",
+ "thiserror",
+]
+
+[[package]]
+name = "spec-engine"
+version = "0.2.0"
+dependencies = [
+ "bincode",
+ "serde",
+ "serde_yaml",
+ "spec-compiler",
  "thiserror",
 ]
 

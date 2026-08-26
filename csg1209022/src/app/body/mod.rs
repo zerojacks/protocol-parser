@@ -13,9 +13,15 @@ use crate::app::da::{DataAddress, DA_LEN};
 use crate::app::datetime::{DataTime, Density, DATA_TIME_LEN};
 use crate::error::{ProtoError, Result};
 use proto_common::{field_value, FieldValue};
+use std::sync::OnceLock;
 
 /// DI 占4字节，传输顺序 DI0,DI1,DI2,DI3（小端），与 spec-engine 的 DI 数值约定一致。
 pub const DI_LEN: usize = 4;
+
+fn spec_engine() -> &'static spec_engine::Engine {
+    static ENGINE: OnceLock<spec_engine::Engine> = OnceLock::new();
+    ENGINE.get_or_init(spec_engine::Engine::new_default)
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct DataUnit {
@@ -82,7 +88,7 @@ pub fn parse_data_units(
                     let content_offset = test_offset + DI_LEN;
                     
                     // 尝试解析DI内容
-                    if let Ok((_, content_consumed)) = spec_engine::parse_di(
+                    if let Ok((_, content_consumed)) = spec_engine().parse_di(
                         protocol,
                         di,
                         region,
@@ -155,7 +161,7 @@ pub fn parse_data_units(
         offset += DI_LEN;
 
         let content_start = offset;
-        let (raw_value, content_consumed) = match spec_engine::parse_di(protocol, di, region, dir, &buf[offset..]) {
+        let (raw_value, content_consumed) = match spec_engine().parse_di(protocol, di, region, dir, &buf[offset..]) {
             Ok(result) => result,
             Err(e) => {
                 // DI内容解析失败，可能是无效的DI或遇到了PW
@@ -312,7 +318,7 @@ pub fn parse_task_data(
                             ]);
                             let content_offset = test_offset + DI_LEN;
                             
-                            if let Ok((_, content_consumed)) = spec_engine::parse_di(
+                            if let Ok((_, content_consumed)) = spec_engine().parse_di(
                                 protocol,
                                 di,
                                 region,
@@ -362,7 +368,7 @@ pub fn parse_task_data(
                 // 解析数据标识内容（变长，由 spec_engine 确定）
                 let content_start = offset;
                 let (raw_value, content_consumed) =
-                    spec_engine::parse_di(protocol, di, region, dir, &buf[offset..])?;
+                    spec_engine().parse_di(protocol, di, region, dir, &buf[offset..])?;
                 offset += content_consumed;
                 let content_raw = buf[content_start..offset].to_vec();
                 let value = field_value::from_spec_engine(&raw_value);
@@ -472,7 +478,7 @@ pub fn parse_history_data_response(
                     ]);
                     let content_offset = test_offset + DI_LEN;
                     
-                    if let Ok((_, content_consumed)) = spec_engine::parse_di(
+                    if let Ok((_, content_consumed)) = spec_engine().parse_di(
                         protocol,
                         di,
                         region,
@@ -528,7 +534,7 @@ pub fn parse_history_data_response(
         // 解析数据标识内容（变长）
         let content_start = offset;
         let (raw_value, content_consumed) =
-            spec_engine::parse_di(protocol, di, region, dir, &buf[offset..])?;
+            spec_engine().parse_di(protocol, di, region, dir, &buf[offset..])?;
         offset += content_consumed;
         let content_raw = buf[content_start..offset].to_vec();
         let value = field_value::from_spec_engine(&raw_value);

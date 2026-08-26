@@ -30,7 +30,7 @@ fn main() {
             println!("✓ 解析成功 (消耗 {} 字节)\n", consumed);
             
             // 使用 Message::to_value_tree() 方法生成树形结构
-            match msg.to_value_tree(&bytes[..consumed]) {
+            match msg.to_value_tree("dlt645-2007", "南网") {
                 Ok(tree) => {
                     print_value_tree(&tree, 0);
                 }

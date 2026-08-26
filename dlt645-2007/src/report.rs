@@ -14,6 +14,77 @@ use crate::control::{ControlCode, Direction, FunctionCode};
 use crate::engine::{decode_message, Message};
 use crate::error::Result;
 use proto_common::FieldValue as Value;
+use std::sync::OnceLock;
+
+fn spec_engine() -> &'static spec_engine::Engine {
+    static ENGINE: OnceLock<spec_engine::Engine> = OnceLock::new();
+    ENGINE.get_or_init(spec_engine::Engine::new_default)
+}
+
+/// 查询 DI 的名称
+///
+/// 使用 spec_engine 的 lookup_di 方法查询数据标识的名称
+fn lookup_di_name(protocol: &str, region: &str, di_hex: &str, dir: Option<&str>) -> Result<String> {
+    // 将十六进制字符串转换为 u32
+    let di_u32 = u32::from_str_radix(di_hex, 16)
+        .map_err(|_| crate::error::Error::InvalidDataFormat {
+            reason: format!("无效的 DI 十六进制字符串: {}", di_hex),
+        })?;
+    // 使用 spec_engine 查询 DI 定义
+    match spec_engine().lookup(protocol, di_u32, region, dir) {
+        Some(filed) => {
+            Ok(filed.name)
+        }
+        _ => {
+            // 查询失败，返回错误
+            Err(crate::error::Error::InvalidDataFormat {
+                reason: format!("DI {} 在 {} {} 中未定义", di_hex, protocol, region),
+            })
+        }
+    }
+}
+
+impl Message {
+    /// 生成报文的一句话摘要，形如 "读数据 · (当前)组合有功总电能 等3项"。
+    ///
+    /// 从结构化的 [`Message`]（功能码枚举 + 应用层数据体）直接提取，
+    /// 而不是从渲染用的 FieldValue 树里做字符串匹配——摘要结构稳定，
+    /// 不受展示树节点命名调整的影响。供日志列表等只需要一行概览的
+    /// 场景使用。
+    pub fn summary(&self, protocol: &str, region: &str) -> String {
+        let function = self.application.function.description();
+        let identifiers: Vec<crate::data_identifier::DataIdentifier> = match &self.application.body {
+            ApplicationBody::ReadRequest { identifiers } => identifiers.clone(),
+            ApplicationBody::ReadResponse { items } => {
+                items.iter().map(|item| item.identifier).collect()
+            }
+            ApplicationBody::WriteRequest { identifier, .. } => vec![*identifier],
+            _ => Vec::new(),
+        };
+        match summarize_identifiers(&identifiers, protocol, region) {
+            Some(item) => format!("{function} · {item}"),
+            None => function.to_string(),
+        }
+    }
+}
+
+/// 摘要里的数据项部分：第一个 DI 的名称，多个 DI 时追加 "等N项"。
+/// 名称查不到（规范未定义）时退回 "DI=XXXXXXXXH"。
+fn summarize_identifiers(
+    identifiers: &[crate::data_identifier::DataIdentifier],
+    protocol: &str,
+    region: &str,
+) -> Option<String> {
+    let first = identifiers.first()?;
+    let di_hex = format!("{:08X}", first.to_u32());
+    let name =
+        lookup_di_name(protocol, region, &di_hex, Some("0")).unwrap_or_else(|_| format!("DI={di_hex}H"));
+    Some(if identifiers.len() > 1 {
+        format!("{name} 等{}项", identifiers.len())
+    } else {
+        name
+    })
+}
 
 /// 解析一条完整报文并渲染成一棵 `Value` 树，返回渲染结果和消耗的字节数。
 ///
@@ -25,14 +96,14 @@ pub fn decode_message_as_value(
     region: &str,
 ) -> Result<(Value, usize)> {
     let (msg, consumed) = decode_message(buf, protocol, region)?;
-    let tree = render_message_as_value(&msg)?;
+    let tree = render_message_as_value(&msg, protocol, region)?;
     Ok((tree, consumed))
 }
 
 /// 将已解析的 Message 渲染成一棵 `Value` 树
 ///
 /// 这是 `Message::to_value_tree()` 的内部实现函数。
-pub fn render_message_as_value(msg: &Message) -> Result<Value> {
+pub fn render_message_as_value(msg: &Message, protocol: &str, region: &str) -> Result<Value> {
     // 从 Message 对象重新编码生成原始字节
     let raw_bytes = msg.frame.encode(false); // false = 不包含前导字节
     
@@ -59,7 +130,7 @@ pub fn render_message_as_value(msg: &Message) -> Result<Value> {
     ));
 
     // 数据域
-    rows.push(application_node(&msg.application, &raw_bytes[10..10 + l]));
+    rows.push(application_node(&msg.application, &raw_bytes[10..10 + l], protocol, region));
 
     // 校验码 CS
     let cs_index = raw_bytes.len() - 2;
@@ -179,8 +250,8 @@ fn extract_bits(byte: u8, bit_start: usize, bit_end: usize) -> u64 {
 }
 
 /// 应用层节点：直接展示数据内容
-fn application_node(app: &ApplicationLayer, raw: &[u8]) -> Value {
-    let body_node = application_body_node(&app.body, raw);
+fn application_node(app: &ApplicationLayer, raw: &[u8], protocol: &str, region: &str) -> Value {
+    let body_node = application_body_node(&app.body, raw, protocol, region);
     
     Value::Node {
         name: "数据域".to_string(),
@@ -190,15 +261,24 @@ fn application_node(app: &ApplicationLayer, raw: &[u8]) -> Value {
 }
 
 /// 应用层数据体节点：根据不同的数据类型展示不同的内容
-fn application_body_node(body: &ApplicationBody, _raw: &[u8]) -> Value {
+fn application_body_node(body: &ApplicationBody, _raw: &[u8], protocol: &str, region: &str) -> Value {
     match body {
         ApplicationBody::ReadRequest { identifiers } => {
             let mut items = Vec::new();
             for (i, di) in identifiers.iter().enumerate() {
+                let di_hex = format!("{:08X}", di.to_u32());
+                
+                // 尝试使用 spec-engine 查询 DI 名称
+                let desc = if let Ok(di_info) = lookup_di_name(protocol, region, &di_hex, Some("0")) {
+                    format!("DI={:08X}H ({})", di.to_u32(), di_info)
+                } else {
+                    format!("DI={:08X}H", di.to_u32())
+                };
+                
                 items.push(leaf(
                     &format!("数据标识 {}", i + 1),
                     di.as_bytes().to_vec(),
-                    format!("DI={:08X}H", di.to_u32()),
+                    desc,
                 ));
             }
             Value::List(items)
@@ -211,11 +291,19 @@ fn application_body_node(body: &ApplicationBody, _raw: &[u8]) -> Value {
             Value::List(rows)
         }
         ApplicationBody::WriteRequest { identifier, password, operator_code, data } => {
+            let di_hex = format!("{:08X}", identifier.to_u32());
+            // WriteRequest 也是主站发起的，方向为下行（0）
+            let di_desc = if let Ok(di_info) = lookup_di_name(protocol, region, &di_hex, Some("0")) {
+                format!("DI={:08X}H ({})", identifier.to_u32(), di_info)
+            } else {
+                format!("DI={:08X}H", identifier.to_u32())
+            };
+            
             let items = vec![
                 leaf(
                     "数据标识",
                     identifier.as_bytes().to_vec(),
-                    format!("DI={:08X}H", identifier.to_u32()),
+                    di_desc,
                 ),
                 leaf(
                     "密码",
@@ -241,11 +329,11 @@ fn application_body_node(body: &ApplicationBody, _raw: &[u8]) -> Value {
         }
         ApplicationBody::WriteResponse => Value::Str("写数据成功".to_string()),
         ApplicationBody::BroadcastTime { time } => Value::Str(format!(
-            "时间={:02}/{:02}/{:02} {:02}:{:02}:{:02}",
+            "时间={:02X}-{:02X}-{:02X} {:02X}:{:02X}:{:02X}",
             time.year, time.month, time.day, time.hour, time.minute, time.second
         )),
         ApplicationBody::Freeze { freeze_time } => Value::Str(format!(
-            "冻结时间={:02}:{:02} {:02}日",
+            "冻结时间={:02X}:{:02X} {:02X}日",
             freeze_time.minute, freeze_time.hour, freeze_time.day
         )),
         ApplicationBody::Error { error_bits } => Value::Str(format!("错误代码={:02X}H", error_bits)),
@@ -286,7 +374,7 @@ mod tests {
         assert_eq!(consumed, 30);
 
         if let Value::Node { name, raw, value } = tree {
-            assert_eq!(name, "报文");
+            assert_eq!(name, "DL/T 645-2007 报文");
             assert_eq!(raw.len(), 30);
             if let Value::List(rows) = *value {
                 assert!(!rows.is_empty());

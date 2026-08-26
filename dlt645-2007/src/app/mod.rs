@@ -9,10 +9,17 @@ pub use body::{
     ApplicationBody, BroadcastTimeData, DataItem, FreezeTime, OperatorCode, Password,
 };
 
+use std::sync::OnceLock;
+
 use crate::control::{Direction, FunctionCode};
 use crate::data_identifier::DataIdentifier;
 use crate::error::Result;
 use proto_common::{from_spec_engine, FieldValue};
+
+fn spec_engine() -> &'static spec_engine::Engine {
+    static ENGINE: OnceLock<spec_engine::Engine> = OnceLock::new();
+    ENGINE.get_or_init(spec_engine::Engine::new_default)
+}
 
 /// 使用 spec-engine 解析 DI 对应的数据内容
 fn parse_di_with_spec_engine(
@@ -28,7 +35,7 @@ fn parse_di_with_spec_engine(
     
     let di_u32 = di.to_u32();
     
-    match spec_engine::parse_di(protocol, di_u32, region, dir, data) {
+    match spec_engine().parse_di(protocol, di_u32, region, dir, data) {
         Ok((value, _consumed)) => Ok(from_spec_engine(&value)),
         Err(e) => {
             // spec-engine 解析失败，返回一个 Invalid 值

@@ -24,6 +24,8 @@ pub mod error;
 pub mod link;
 pub mod report;
 
+use std::println;
+
 pub use engine::{decode_message, encode_message, Message};
 pub use error::{ProtoError, Result};
 pub use proto_common::FieldValue;
@@ -61,11 +63,13 @@ pub fn is_csg1209022_frame(buf: &[u8]) -> bool {
     }
 
     if (frame_len + 8 ) != buf.len() {
+        println!("frame len is error");
         return false;
     }
 
     // 检查结束符
-    if buf[frame_len - 1] != 0x16 {
+    if buf[frame_len + 7] != 0x16 {
+        println!("frame end not 16");
         return false;
     }
     true

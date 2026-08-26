@@ -30,6 +30,7 @@
 //!   `schema/csg13` 的补充，不在本 crate 里做。
 
 use proto_common::FieldValue as Value;
+use std::sync::OnceLock;
 
 use crate::app::body::{ack, WriteParamError};
 use crate::app::{ApplicationBody, ApplicationLayer, DataIdentifier, DataUnit, HistoryDataQuery, PointSelector, Tp};
@@ -37,6 +38,29 @@ use crate::engine::Message;
 use crate::error::Result;
 use crate::link::control::{ControlField, Direction};
 use crate::link::{AddressField, Frame};
+
+fn spec_engine() -> &'static spec_engine::Engine {
+    static ENGINE: OnceLock<spec_engine::Engine> = OnceLock::new();
+    ENGINE.get_or_init(spec_engine::Engine::new_default)
+}
+
+/// 查询 DI 的名称
+///
+/// 使用 spec_engine 的 lookup 方法查询数据标识的名称
+fn lookup_di_name(protocol: &str, region: &str, di_hex: &str, dir: Option<&str>) -> Result<String> {
+    // 将十六进制字符串转换为 u32
+    let di_u32 = u32::from_str_radix(di_hex, 16)
+        .map_err(|_| crate::error::ProtoError::UnknownDi(di_hex.to_string()))?;
+    
+    // 使用 spec_engine 查询 DI 定义
+    match spec_engine().lookup(protocol, di_u32, region, dir) {
+        Some(field) => Ok(field.name),
+        _ => {
+            // 查询失败，返回错误
+            Err(crate::error::ProtoError::UnknownDi(di_hex.to_string()))
+        }
+    }
+}
 
 /// 解析一条完整报文并渲染成一棵 `Value` 树，返回渲染结果和消耗的字节数。
 ///
@@ -53,14 +77,20 @@ pub fn decode_message_as_value(
         ApplicationLayer::decode(&frame.payload, frame.control.direction, protocol, region)?;
     
     let msg = Message { frame, application };
-    let tree = render_message_as_value(&msg)?;
+    let tree = render_message_as_value(&msg, protocol, region)?;
     Ok((tree, consumed))
 }
 
 /// 将已解析的 Message 渲染成一棵 `Value` 树
 ///
 /// 这是 `Message::to_value_tree()` 的内部实现函数。
-pub fn render_message_as_value(msg: &Message) -> Result<Value> {
+///
+/// # 参数
+///
+/// - `msg`: 已解析的报文
+/// - `protocol`: 协议标识（如 "csg13"）
+/// - `region`: 区域标识（如 "南网"）
+pub fn render_message_as_value(msg: &Message, protocol: &str, region: &str) -> Result<Value> {
     // 从 Message 对象重新编码生成原始字节
     let raw_bytes = msg.frame.encode()?;
     
@@ -87,7 +117,7 @@ pub fn render_message_as_value(msg: &Message) -> Result<Value> {
         msg.application.afn.description(),
     ));
     rows.push(seq_field_node(&msg.application.seq));
-    rows.push(application_body_node(&msg.application.body));
+    rows.push(application_body_node(&msg.application.body, protocol, region, &msg.frame.control.direction));
 
     if let Some(tp) = &msg.application.tp {
         rows.push(tp_node(tp)?);
@@ -303,7 +333,13 @@ fn seq_field_node(seq: &crate::app::SeqField) -> Value {
     }
 }
 
-fn application_body_node(body: &ApplicationBody) -> Value {
+fn application_body_node(body: &ApplicationBody, protocol: &str, region: &str, direction: &Direction) -> Value {
+    // 根据方向确定 dir 参数
+    let dir_str = match direction {
+        Direction::Down => Some("0"),
+        Direction::Up => Some("1"),
+    };
+    
     match body {
         // 上行响应：带DA+DI+内容的数据单元
         ApplicationBody::Ack(units)
@@ -325,7 +361,7 @@ fn application_body_node(body: &ApplicationBody) -> Value {
                 .enumerate()
                 .map(|(i, unit)| {
                     raw.extend_from_slice(&unit.raw);
-                    data_unit_group_node(i + 1, unit)
+                    data_unit_group_node(i + 1, unit, protocol, region, dir_str)
                 })
                 .collect();
             Value::Node {
@@ -347,7 +383,7 @@ fn application_body_node(body: &ApplicationBody) -> Value {
                 .enumerate()
                 .map(|(i, id)| {
                     raw.extend_from_slice(&id.encode());
-                    data_identifier_group_node(i + 1, id)
+                    data_identifier_group_node(i + 1, id, protocol, region, dir_str)
                 })
                 .collect();
             Value::Node {
@@ -364,7 +400,7 @@ fn application_body_node(body: &ApplicationBody) -> Value {
                 .enumerate()
                 .map(|(i, unit)| {
                     raw.extend_from_slice(&unit.raw);
-                    data_unit_group_node(i + 1, unit)
+                    data_unit_group_node(i + 1, unit, protocol, region, dir_str)
                 })
                 .collect();
             Value::Node {
@@ -388,7 +424,7 @@ fn application_body_node(body: &ApplicationBody) -> Value {
                         v
                     };
                     raw.extend_from_slice(&err_raw);
-                    write_param_error_node(i + 1, err, &err_raw)
+                    write_param_error_node(i + 1, err, &err_raw, protocol, region, dir_str)
                 })
                 .collect();
             Value::Node {
@@ -414,7 +450,7 @@ fn application_body_node(body: &ApplicationBody) -> Value {
                         v
                     };
                     raw.extend_from_slice(&query_raw);
-                    history_data_query_node(i + 1, q, &query_raw)
+                    history_data_query_node(i + 1, q, &query_raw, protocol, region, dir_str)
                 })
                 .collect();
             Value::Node {
@@ -458,13 +494,20 @@ fn content_name(di: u32, value: &Value) -> String {
     }
 }
 
-fn data_unit_group_node(index: usize, unit: &DataUnit) -> Value {
+fn data_unit_group_node(index: usize, unit: &DataUnit, protocol: &str, region: &str, dir: Option<&str>) -> Value {
     let da_desc = point_selector_desc(&unit.da.point_selector());
-    let di_desc = format!(
-        "数据标识编码：[{:08X}]-{}",
-        unit.di,
-        content_name(unit.di, &unit.value)
-    );
+    
+    // 尝试查询 DI 名称
+    let di_hex = format!("{:08X}", unit.di);
+    let di_desc = if let Ok(name) = lookup_di_name(protocol, region, &di_hex, dir) {
+        format!("数据标识编码：[{:08X}]-({})", unit.di, name)
+    } else {
+        format!(
+            "数据标识编码：[{:08X}]-{}",
+            unit.di,
+            content_name(unit.di, &unit.value)
+        )
+    };
 
     let mut children = vec![
         leaf("信息点标识DA", unit.da.encode().to_vec(), da_desc),
@@ -504,9 +547,16 @@ fn data_unit_group_node(index: usize, unit: &DataUnit) -> Value {
     }
 }
 
-fn data_identifier_group_node(index: usize, id: &DataIdentifier) -> Value {
+fn data_identifier_group_node(index: usize, id: &DataIdentifier, protocol: &str, region: &str, dir: Option<&str>) -> Value {
     let da_desc = point_selector_desc(&id.da.point_selector());
-    let di_desc = format!("数据标识编码：[{:08X}]", id.di);
+    
+    // 尝试查询 DI 名称
+    let di_hex = format!("{:08X}", id.di);
+    let di_desc = if let Ok(name) = lookup_di_name(protocol, region, &di_hex, dir) {
+        format!("数据标识编码：[{:08X}]-({})", id.di, name)
+    } else {
+        format!("数据标识编码：[{:08X}]", id.di)
+    };
 
     let children = vec![
         leaf("信息点标识DA", id.da.encode().to_vec(), da_desc),
@@ -521,9 +571,16 @@ fn data_identifier_group_node(index: usize, id: &DataIdentifier) -> Value {
     }
 }
 
-fn write_param_error_node(index: usize, err: &WriteParamError, raw: &[u8]) -> Value {
+fn write_param_error_node(index: usize, err: &WriteParamError, raw: &[u8], protocol: &str, region: &str, dir: Option<&str>) -> Value {
     let da_desc = point_selector_desc(&err.da.point_selector());
-    let di_desc = format!("数据标识编码：[{:08X}]", err.di);
+    
+    // 尝试查询 DI 名称
+    let di_hex = format!("{:08X}", err.di);
+    let di_desc = if let Ok(name) = lookup_di_name(protocol, region, &di_hex, dir) {
+        format!("数据标识编码：[{:08X}]-({})", err.di, name)
+    } else {
+        format!("数据标识编码：[{:08X}]", err.di)
+    };
     let err_desc = format!("错误码：0x{:02X}", err.err);
 
     let children = vec![
@@ -539,9 +596,16 @@ fn write_param_error_node(index: usize, err: &WriteParamError, raw: &[u8]) -> Va
     }
 }
 
-fn history_data_query_node(index: usize, q: &HistoryDataQuery, raw: &[u8]) -> Value {
+fn history_data_query_node(index: usize, q: &HistoryDataQuery, raw: &[u8], protocol: &str, region: &str, dir: Option<&str>) -> Value {
     let da_desc = point_selector_desc(&q.da.point_selector());
-    let di_desc = format!("数据标识编码：[{:08X}]", q.di);
+    
+    // 尝试查询 DI 名称
+    let di_hex = format!("{:08X}", q.di);
+    let di_desc = if let Ok(name) = lookup_di_name(protocol, region, &di_hex, dir) {
+        format!("数据标识编码：[{:08X}]-({})", q.di, name)
+    } else {
+        format!("数据标识编码：[{:08X}]", q.di)
+    };
     let start_desc = format!(
         "起始时间：{}年{}月{}日{}时{}分",
         q.start_time.year, q.start_time.month, q.start_time.day, q.start_time.hour, q.start_time.minute

@@ -12,6 +12,12 @@ pub use afn::Afn;
 pub use body::ApplicationBody;
 pub use di::{DataIdentifier, MessageDirection, NodeRole};
 use proto_common::from_spec_engine;
+use std::sync::OnceLock;
+
+fn spec_engine() -> &'static spec_engine::Engine {
+    static ENGINE: OnceLock<spec_engine::Engine> = OnceLock::new();
+    ENGINE.get_or_init(spec_engine::Engine::new_default)
+}
 
 /// 应用层
 #[derive(Debug, Clone, PartialEq)]
@@ -74,7 +80,7 @@ impl ApplicationLayer {
 
             let di_u32 = di.to_u32();
 
-            match spec_engine::parse_di(protocol, di_u32, region, dir_str, raw_data) {
+            match spec_engine().parse_di(protocol, di_u32, region, dir_str, raw_data) {
                 Ok((value, _consumed)) => {
                     *parsed_value = Some(from_spec_engine(&value));
                 }

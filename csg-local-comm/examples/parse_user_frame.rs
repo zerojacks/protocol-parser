@@ -70,7 +70,7 @@ fn main() {
 
             // 渲染为树形结构
             println!("\n=== 树形展示 ===\n");
-            if let Ok(tree) = report::render_message_as_value(&msg) {
+            if let Ok(tree) = report::render_message_as_value(&msg, "csg13", "南网") {
                 print_value_tree(&tree, 0);
             }
         }

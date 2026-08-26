@@ -30,6 +30,9 @@ pub enum ProtoError {
 
     #[error("DI内容解析失败: {0}")]
     Dict(#[from] spec_engine::DictError),
+
+    #[error("未知DI: {0}")]
+    UnknownDi(String),
 }
 
 pub type Result<T> = std::result::Result<T, ProtoError>;

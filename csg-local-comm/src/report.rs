@@ -5,6 +5,34 @@
 use crate::engine::Message;
 use crate::error::Result;
 use proto_common::FieldValue as Value;
+use std::sync::OnceLock;
+
+fn spec_engine() -> &'static spec_engine::Engine {
+    static ENGINE: OnceLock<spec_engine::Engine> = OnceLock::new();
+    ENGINE.get_or_init(spec_engine::Engine::new_default)
+}
+
+/// 查询 DI 的名称
+///
+/// 使用 spec_engine 的 lookup 方法查询数据标识的名称
+fn lookup_di_name(protocol: &str, region: &str, di_hex: &str, dir: Option<&str>) -> Result<String> {
+    // 将十六进制字符串转换为 u32
+    let di_u32 = u32::from_str_radix(di_hex, 16)
+        .map_err(|_| crate::error::Error::InvalidDataFormat {
+            reason: format!("无效的 DI 十六进制字符串: {}", di_hex),
+        })?;
+    
+    // 使用 spec_engine 查询 DI 定义
+    match spec_engine().lookup(protocol, di_u32, region, dir) {
+        Some(field) => Ok(field.name),
+        _ => {
+            // 查询失败，返回错误
+            Err(crate::error::Error::InvalidDataFormat {
+                reason: format!("DI {} 在 {} {} 中未定义", di_hex, protocol, region),
+            })
+        }
+    }
+}
 
 /// 将已解析的 Message 渲染成一棵 `Value` 树
 ///
@@ -12,7 +40,13 @@ use proto_common::FieldValue as Value;
 /// - name: 字段名
 /// - raw: 原始字节（十六进制）
 /// - value: 解析后的值
-pub fn render_message_as_value(msg: &Message) -> Result<Value> {
+///
+/// # 参数
+///
+/// - `msg`: 已解析的报文
+/// - `protocol`: 协议标识（如 "csg13"）
+/// - `region`: 区域标识（如 "南网"）
+pub fn render_message_as_value(msg: &Message, protocol: &str, region: &str) -> Result<Value> {
     let mut fields = Vec::new();
 
     // 起始符 68H
@@ -37,8 +71,8 @@ pub fn render_message_as_value(msg: &Message) -> Result<Value> {
     // SEQ（帧序号）
     fields.push(leaf("SEQ", vec![msg.app.seq], format!("{}", msg.app.seq)));
 
-    // DI（数据标识，4字节）- 展开显示
-    fields.push(di_node(&msg.app.di));
+    // DI（数据标识，4字节）- 展开显示，并查询名称
+    fields.push(di_node(&msg.app.di, protocol, region, &msg.frame.control.direction));
 
     // 数据内容
     match &msg.app.body {
@@ -172,11 +206,28 @@ fn address_domain_node(addr: &crate::link::AddressDomain) -> Value {
     }
 }
 
-/// DI（数据标识）节点：展开显示各个字段（中文输出）
-fn di_node(di: &crate::app::DataIdentifier) -> Value {
+/// DI（数据标识）节点：展开显示各个字段（中文输出）并查询名称
+fn di_node(di: &crate::app::DataIdentifier, protocol: &str, region: &str, direction: &crate::control::Direction) -> Value {
     let di_bytes = di.to_bytes();
+    let di_hex = format!("{:02X}{:02X}{:02X}{:02X}", di_bytes[0], di_bytes[1], di_bytes[2], di_bytes[3]);
+    
+    // 根据方向确定 dir 参数
+    let dir_str = match direction {
+        crate::control::Direction::Downlink => Some("0"),
+        crate::control::Direction::Uplink => Some("1"),
+    };
+    
+    // 尝试查询 DI 名称
+    let di_name = if let Ok(name) = lookup_di_name(protocol, region, &di_hex, dir_str) {
+        format!("DI={} ({})", di_hex, name)
+    } else {
+        format!("DI={}", di_hex)
+    };
     
     let mut children = Vec::new();
+    
+    // DI 名称（如果查询到）
+    children.push(leaf("DI标识", vec![], di_name));
     
     // 节点角色 (中文)
     let role_desc = match di.node_role {
@@ -270,7 +321,7 @@ mod tests {
         };
 
         let msg = Message { frame, app };
-        let tree = render_message_as_value(&msg).unwrap();
+        let tree = render_message_as_value(&msg, "csg13", "南网").unwrap();
 
         // 验证是一个节点
         match tree {
@@ -311,7 +362,7 @@ mod tests {
         };
 
         let msg = Message { frame, app };
-        let tree = render_message_as_value(&msg).unwrap();
+        let tree = render_message_as_value(&msg, "csg13", "南网").unwrap();
 
         // 验证包含地址域
         match tree {

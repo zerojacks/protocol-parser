@@ -86,15 +86,15 @@ impl ParsedMessage {
     pub fn to_value_tree(&self) -> Result<FieldValue, ParseError> {
         match self {
             ParsedMessage::Dlt645(msg) => {
-                msg.to_value_tree()
+                msg.to_value_tree("dlt645-2007", "南网")
                     .map_err(|e| ParseError::RenderError(format!("{:?}", e)))
             }
             ParsedMessage::Csg1209022(msg) => {
-                msg.to_value_tree()
+                msg.to_value_tree("csg13", "南网")
                     .map_err(|e| ParseError::RenderError(format!("{:?}", e)))
             }
             ParsedMessage::CsgLocalComm(msg) => {
-                csg_local_comm::report::render_message_as_value(msg)
+                msg.to_value_tree("csg16", "南网" )
                     .map_err(|e| ParseError::RenderError(format!("{:?}", e)))
             }
         }

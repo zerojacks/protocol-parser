@@ -15,6 +15,11 @@ pub struct Message {
 impl Message {
     /// 将报文渲染成树形 FieldValue 结构，适合前端 UI 展示
     ///
+    /// # 参数
+    ///
+    /// - `protocol`: 协议标识（如 "csg13"）
+    /// - `region`: 区域标识（如 "南网"）
+    ///
     /// # 返回
     ///
     /// 根节点为 "Q/CSG1209022-2019 报文" 的 FieldValue 树，包含所有字段的 name/raw/value 信息
@@ -23,11 +28,11 @@ impl Message {
     ///
     /// ```rust,ignore
     /// let (msg, consumed) = decode_message(&bytes, "csg13", "南网")?;
-    /// let tree = msg.to_value_tree()?;
+    /// let tree = msg.to_value_tree("csg13", "南网")?;
     /// // 现在可以序列化 tree 发送给前端，或递归遍历展示
     /// ```
-    pub fn to_value_tree(&self) -> Result<FieldValue> {
-        crate::report::render_message_as_value(self)
+    pub fn to_value_tree(&self, protocol: &str, region: &str) -> Result<FieldValue> {
+        crate::report::render_message_as_value(self, protocol, region)
     }
 }
 

@@ -41,7 +41,7 @@ fn main() {
             println!("  数据体: {:?}", msg.app.body);
 
             // 渲染为树形结构
-            if let Ok(tree) = report::render_message_as_value(&msg) {
+            if let Ok(tree) = report::render_message_as_value(&msg, "csg13", "南网") {
                 println!("\n树形展示:");
                 print_value_tree(&tree, 0);
             }
@@ -80,7 +80,7 @@ fn main() {
             println!("  DI: {:08X}H", msg.app.di.to_u32());
             println!("  数据体: {:?}", msg.app.body);
 
-            if let Ok(tree) = report::render_message_as_value(&msg) {
+            if let Ok(tree) = report::render_message_as_value(&msg, "csg13", "南网") {
                 println!("\n树形展示:");
                 print_value_tree(&tree, 0);
             }
