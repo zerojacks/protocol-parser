@@ -153,6 +153,7 @@ dependencies = [
 [[package]]
 name = "spec-compiler"
 version = "0.2.0"
+source = "git+https://github.com/zerojacks/spec-engine#64cd8f5413d3ea22d6e8cedbb27b287285baf195"
 dependencies = [
  "bincode",
  "serde",
@@ -163,6 +164,7 @@ dependencies = [
 [[package]]
 name = "spec-engine"
 version = "0.2.0"
+source = "git+https://github.com/zerojacks/spec-engine#64cd8f5413d3ea22d6e8cedbb27b287285baf195"
 dependencies = [
  "bincode",
  "serde",
