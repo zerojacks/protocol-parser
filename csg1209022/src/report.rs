@@ -524,12 +524,12 @@ fn data_unit_group_node(index: usize, unit: &DataUnit, protocol: &str, region: &
     ];
 
     if let Some(time) = &unit.time {
-        let raw = time.encode().map(|b| b.to_vec()).unwrap_or_default();
+        let raw = time.encode().map(|bytes| bytes.to_vec()).unwrap_or_default();
         children.push(leaf(
             "数据时间",
             raw,
             format!(
-                "{}年{}月{}日{}时{}分",
+                "{:04}年{:02}月{:02}日{:02}时{:02}分",
                 time.year, time.month, time.day, time.hour, time.minute
             ),
         ));
@@ -607,11 +607,11 @@ fn history_data_query_node(index: usize, q: &HistoryDataQuery, raw: &[u8], proto
         format!("数据标识编码：[{:08X}]", q.di)
     };
     let start_desc = format!(
-        "起始时间：{}年{}月{}日{}时{}分",
+        "起始时间：{:04}年{:02}月{:02}日{:02}时{:02}分",
         q.start_time.year, q.start_time.month, q.start_time.day, q.start_time.hour, q.start_time.minute
     );
     let end_desc = format!(
-        "结束时间：{}年{}月{}日{}时{}分",
+        "结束时间：{:04}年{:02}月{:02}日{:02}时{:02}分",
         q.end_time.year, q.end_time.month, q.end_time.day, q.end_time.hour, q.end_time.minute
     );
     let density_desc = format!("数据密度：{:?}", q.density);

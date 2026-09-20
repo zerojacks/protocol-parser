@@ -439,7 +439,7 @@ pub fn parse_task_data(
 
 /// 解析读历史数据响应中的多时间点数据（AFN=0DH上行）。
 ///
-/// AFN=0DH 上行报文格式：循环 [DA + DI + 内容 + 时间(6字节)] 直到缓冲区结束
+/// AFN=0DH 上行报文格式：循环 [DA + DI + (内容 + 时间(6字节)) × N]
 /// 
 /// 协议描述（6.2.7.2.1）：
 /// "每个DA、DI的值唯一表示一个信息点和一个数据标识，后面紧跟数据标识的内容和数据时间。
@@ -447,7 +447,7 @@ pub fn parse_task_data(
 /// 
 /// 注意：
 /// - 同一DA+DI可以重复出现多次，每次对应不同时间点的数据
-/// - 通过循环解析直到缓冲区结束，而不是依赖记录数字段
+/// - 同一 DA+DI 的后续时间点不重复携带 DA+DI，数量需要通过内容和时间判断
 pub fn parse_history_data_response(
     buf: &[u8],
     protocol: &str,
@@ -485,10 +485,11 @@ pub fn parse_history_data_response(
                         dir,
                         &buf[content_offset..],
                     ) {
-                        // AFN=0DH格式：DA + DI + 内容 + 时间(6字节)
-                        let expected_consumed = da_consumed + DI_LEN + content_consumed + DATA_TIME_LEN;
-                        
-                        if expected_consumed > PW_LEN || (expected_consumed < PW_LEN && da_consumed + DI_LEN + content_consumed != PW_LEN) {
+                        // 16字节剩余区只有在恰好构成一个完整数据点时才不是PW。
+                        let expected_consumed =
+                            da_consumed + DI_LEN + content_consumed + DATA_TIME_LEN;
+
+                        if expected_consumed != PW_LEN {
                             is_pw = true;
                         }
                     } else {
@@ -531,35 +532,124 @@ pub fn parse_history_data_response(
         ]);
         offset += DI_LEN;
 
-        // 解析数据标识内容（变长）
-        let content_start = offset;
-        let (raw_value, content_consumed) =
-            spec_engine().parse_di(protocol, di, region, dir, &buf[offset..])?;
-        offset += content_consumed;
-        let content_raw = buf[content_start..offset].to_vec();
-        let value = field_value::from_spec_engine(&raw_value);
+        let mut values = Vec::new();
+        let mut content_raw = Vec::new();
+        let mut previous_time = None;
+        loop {
+            let unit_start = offset;
+            let (raw_value, content_consumed) = match spec_engine().parse_di(
+                protocol,
+                di,
+                region,
+                dir,
+                &buf[offset..],
+            ) {
+                Ok(result) => result,
+                Err(error) if !values.is_empty() => {
+                    offset = unit_start;
+                    let _ = error;
+                    break;
+                }
+                Err(error) => return Err(ProtoError::Dict(error)),
+            };
+            let content_start = offset;
+            offset += content_consumed;
+            content_raw.extend_from_slice(&buf[content_start..offset]);
 
-        // 解析数据时间（6字节）
-        if buf.len() < offset + DATA_TIME_LEN {
-            // 时间字段不完整，这可能是解析错误
-            break;
+            if buf.len() < offset + DATA_TIME_LEN {
+                offset = group_start;
+                break;
+            }
+            let (time, time_consumed) = match DataTime::decode(&buf[offset..]) {
+                Ok(result) => result,
+                Err(error) if !values.is_empty() => {
+                    offset = unit_start;
+                    let _ = error;
+                    break;
+                }
+                Err(error) => return Err(error),
+            };
+            offset += time_consumed;
+
+            if !is_valid_history_time(&time)
+                || previous_time
+                    .as_ref()
+                    .is_some_and(|previous| !is_history_time_after(&time, previous))
+            {
+                offset = unit_start;
+                break;
+            }
+
+            let time_value = FieldValue::Node {
+                name: "数据时间".to_string(),
+                raw: time.encode().map(|bytes| bytes.to_vec()).unwrap_or_default(),
+                value: Box::new(FieldValue::Str(format!(
+                    "{:04}年{:02}月{:02}日{:02}时{:02}分",
+                    time.year, time.month, time.day, time.hour, time.minute
+                ))),
+            };
+            values.push(FieldValue::Map(vec![
+                (
+                    "数据内容".to_string(),
+                    field_value::from_spec_engine(&raw_value),
+                ),
+                ("数据时间".to_string(), time_value),
+            ]));
+            previous_time = Some(time);
         }
-        let (time, time_consumed) = DataTime::decode(&buf[offset..])?;
-        offset += time_consumed;
 
-        let raw = buf[group_start..offset].to_vec();
-
-        units.push(DataUnit {
-            da,
-            di,
-            value,
-            time: Some(time),
-            raw,
-            content_raw,
-        });
+        if !values.is_empty() {
+            let raw = buf[group_start..offset].to_vec();
+            units.push(DataUnit {
+                da,
+                di,
+                value: FieldValue::List(values),
+                time: None,
+                raw,
+                content_raw,
+            });
+        }
     }
 
     Ok((units, offset))
+}
+
+fn is_valid_history_time(time: &DataTime) -> bool {
+    if !(1..=12).contains(&time.month)
+        || !(0..=23).contains(&time.hour)
+        || !(0..=59).contains(&time.minute)
+    {
+        return false;
+    }
+
+    let days_in_month: u8 = match time.month {
+        2 => {
+            if time.year % 4 == 0 {
+                29
+            } else {
+                28
+            }
+        }
+        4 | 6 | 9 | 11 => 30,
+        _ => 31,
+    };
+    (1..=days_in_month).contains(&time.day)
+}
+
+fn is_history_time_after(current: &DataTime, previous: &DataTime) -> bool {
+    (
+        current.year,
+        current.month,
+        current.day,
+        current.hour,
+        current.minute,
+    ) > (
+        previous.year,
+        previous.month,
+        previous.day,
+        previous.hour,
+        previous.minute,
+    )
 }
 
 /// BCD码转十进制
@@ -706,6 +796,49 @@ mod tests {
         buf.extend_from_slice(&id2.encode());
         let parsed = parse_data_identifiers(&buf).unwrap();
         assert_eq!(parsed, vec![id1, id2]);
+    }
+
+    #[test]
+    fn parse_history_data_with_multiple_time_points() {
+        let da1 = DataAddress::from_point_number(1).unwrap();
+        let da2 = DataAddress::from_point_number(2).unwrap();
+        let di: u32 = 0x0001_0000;
+        let mut buf = Vec::new();
+
+        buf.extend_from_slice(&da1.encode());
+        buf.extend_from_slice(&di.to_le_bytes());
+        buf.extend_from_slice(&[0x23, 0x01, 0x00, 0x00]);
+        buf.extend_from_slice(&[0x20, 0x26, 0x09, 0x20, 0x10, 0x00]);
+        buf.extend_from_slice(&[0x24, 0x01, 0x00, 0x00]);
+        buf.extend_from_slice(&[0x20, 0x26, 0x09, 0x20, 0x10, 0x01]);
+
+        buf.extend_from_slice(&da2.encode());
+        buf.extend_from_slice(&di.to_le_bytes());
+        buf.extend_from_slice(&[0x25, 0x01, 0x00, 0x00]);
+        buf.extend_from_slice(&[0x20, 0x26, 0x09, 0x20, 0x10, 0x02]);
+
+        let (units, consumed) =
+            parse_history_data_response(&buf, "csg13", "南网", Some("1")).unwrap();
+
+        assert_eq!(consumed, buf.len());
+        assert_eq!(units.len(), 2);
+        assert_eq!(units[0].da, da1);
+        assert_eq!(units[1].da, da2);
+        match &units[0].value {
+            FieldValue::List(values) => {
+                assert_eq!(values.len(), 2);
+                assert!(matches!(
+                    &values[0],
+                    FieldValue::Map(entries) if entries.len() == 2
+                ));
+                assert!(matches!(
+                    &values[1],
+                    FieldValue::Map(entries) if entries.len() == 2
+                ));
+            }
+            other => panic!("期望历史内容列表，实际得到 {other:?}"),
+        }
+        assert!(matches!(&units[1].value, FieldValue::List(values) if values.len() == 1));
     }
 
     // 端到端：真实 DI 内容解析走 spec-engine，覆盖在 tests/ 下的集成测试里，
