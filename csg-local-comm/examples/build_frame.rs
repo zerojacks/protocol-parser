@@ -19,6 +19,7 @@ fn main() {
             destination: Address::from_bytes([0x11, 0x12, 0x13, 0x14, 0x15, 0x16]),
         }),
         payload: Vec::new(), // 会被应用层填充
+        checksum: 0,
     };
 
     // 2. 构建应用层
@@ -55,6 +56,7 @@ fn main() {
         control: ControlByte::uplink_response_without_address(),
         address: None, // 无地址域
         payload: Vec::new(),
+        checksum: 0,
     };
 
     let ack_app = ApplicationLayer {
@@ -86,6 +88,7 @@ fn main() {
         control: ControlByte::uplink_response_without_address(),
         address: None,
         payload: Vec::new(),
+        checksum: 0,
     };
 
     let nack_app = ApplicationLayer {
@@ -132,6 +135,7 @@ fn main() {
         control: ControlByte::downlink_primary_without_address(),
         address: None,
         payload: Vec::new(),
+        checksum: 0,
     };
 
     let data_app = ApplicationLayer {

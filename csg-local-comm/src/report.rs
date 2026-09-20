@@ -120,6 +120,14 @@ pub fn render_message_as_value(msg: &Message, protocol: &str, region: &str) -> R
         }
     }
 
+    // 校验和 CS
+    let checksum = msg.frame.checksum;
+    fields.push(leaf(
+        "校验和",
+        vec![checksum],
+        format!("{:02X}H", checksum),
+    ));
+
     // 结束符 16H
     fields.push(leaf("结束符", vec![0x16], "16H".to_string()));
 
@@ -320,6 +328,7 @@ mod tests {
                 0x01, // SEQ = 1
                 0xE8, 0x01, 0x00, 0x01, // DI = 确认
             ],
+            checksum: 0,
         };
 
         let app = ApplicationLayer {
@@ -347,6 +356,7 @@ mod tests {
             control: ControlByte::uplink_response_with_address(),
             address: None,
             payload: vec![0x00, 0x01, 0xE8, 0x01, 0x00, 0x01],
+            checksum: 0,
         };
         let app = ApplicationLayer {
             afn: Afn::AckNack,
@@ -366,6 +376,14 @@ mod tests {
                     assert!(matches!(
                         &fields[2],
                         Value::Node { name, .. } if name == "控制字"
+                    ));
+                    assert!(matches!(
+                        &fields[fields.len() - 2],
+                        Value::Node { name, raw, .. } if name == "校验和" && raw.len() == 1
+                    ));
+                    assert!(matches!(
+                        &fields[fields.len() - 1],
+                        Value::Node { name, raw, .. } if name == "结束符" && raw == &vec![0x16]
                     ));
                 }
                 _ => panic!("Expected root node with field list"),
@@ -389,6 +407,7 @@ mod tests {
                 0x10, // SEQ = 16
                 0xE8, 0x01, 0x03, 0x01, // DI
             ],
+            checksum: 0,
         };
 
         let app = ApplicationLayer {

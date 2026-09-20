@@ -32,6 +32,8 @@ pub struct Frame {
     pub address: Option<AddressDomain>,
     /// 用户数据区（AFN + SEQ + DI + 数据标识内容）
     pub payload: Vec<u8>,
+    /// 校验和
+    pub checksum: u8,
 }
 
 impl Frame {
@@ -113,6 +115,7 @@ impl Frame {
                 control,
                 address,
                 payload,
+                checksum: expected_cs,
             },
             frame_len,
         ))
@@ -151,14 +154,29 @@ impl Frame {
         buf.extend_from_slice(&self.payload);
 
         // CS（C + 用户数据区的校验和）
-        let cs_start = 3; // C 的位置
-        let cs = Self::calculate_checksum(&buf[cs_start..]);
+        let cs = self.calculated_checksum();
         buf.push(cs);
 
         // 16H
         buf.push(END_CHAR);
 
         Ok(buf)
+    }
+
+    /// 计算当前帧的校验和：控制字节、地址域和用户数据区的算术和（mod 256）。
+    fn calculated_checksum(&self) -> u8 {
+        let control = [self.control.to_byte()];
+        let address = self
+            .address
+            .as_ref()
+            .map(AddressDomain::encode)
+            .unwrap_or_default();
+
+        let mut data = Vec::with_capacity(control.len() + address.len() + self.payload.len());
+        data.extend_from_slice(&control);
+        data.extend_from_slice(&address);
+        data.extend_from_slice(&self.payload);
+        Self::calculate_checksum(&data)
     }
 
     /// 计算校验和：C + 用户数据区的算术和（mod 256）
@@ -229,6 +247,7 @@ mod tests {
                 destination: Address::from_bytes([0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF]),
             }),
             payload: vec![0x01, 0x02, 0x03, 0x04],
+            checksum: 0xCA,
         };
 
         let bytes = frame.encode().unwrap();

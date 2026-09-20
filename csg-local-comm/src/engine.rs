@@ -98,6 +98,7 @@ mod tests {
                 0x01, // SEQ = 1
                 0xE8, 0x01, 0x03, 0x01, // DI
             ],
+            checksum: 0,
         };
 
         let app = ApplicationLayer {
