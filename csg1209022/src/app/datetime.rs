@@ -83,6 +83,21 @@ pub enum Density {
 }
 
 impl Density {
+    pub fn description(self) -> String {
+        match self {
+            Density::Native => "终端存储密度".to_string(),
+            Density::OneMinute => "1分钟".to_string(),
+            Density::FiveMinutes => "5分钟".to_string(),
+            Density::FifteenMinutes => "15分钟".to_string(),
+            Density::ThirtyMinutes => "30分钟".to_string(),
+            Density::SixtyMinutes => "60分钟".to_string(),
+            Density::Daily => "日".to_string(),
+            Density::Monthly => "月".to_string(),
+            Density::SettlementDay => "结算日".to_string(),
+            Density::Reserved(value) => format!("保留值({value})"),
+        }
+    }
+
     pub fn decode(byte: u8) -> Self {
         match byte {
             0 => Density::Native,
@@ -191,6 +206,9 @@ mod tests {
             let d = Density::decode(b);
             assert_eq!(d.encode(), b);
         }
+        assert_eq!(Density::decode(0).description(), "终端存储密度");
+        assert_eq!(Density::decode(1).description(), "1分钟");
+        assert_eq!(Density::decode(99).description(), "保留值(99)");
     }
 
     #[test]

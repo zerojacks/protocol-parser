@@ -614,7 +614,7 @@ fn history_data_query_node(index: usize, q: &HistoryDataQuery, raw: &[u8], proto
         "结束时间：{:04}年{:02}月{:02}日{:02}时{:02}分",
         q.end_time.year, q.end_time.month, q.end_time.day, q.end_time.hour, q.end_time.minute
     );
-    let density_desc = format!("数据密度：{:?}", q.density);
+    let density_desc = format!("数据密度：{}", q.density.description());
 
     let children = vec![
         leaf("信息点标识DA", q.da.encode().to_vec(), da_desc),
