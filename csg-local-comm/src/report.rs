@@ -48,9 +48,18 @@ fn lookup_di_name(protocol: &str, region: &str, di_hex: &str, dir: Option<&str>)
 /// - `region`: 区域标识（如 "南网"）
 pub fn render_message_as_value(msg: &Message, protocol: &str, region: &str) -> Result<Value> {
     let mut fields = Vec::new();
+    let raw_bytes = msg.frame.encode()?;
 
     // 起始符 68H
     fields.push(leaf("起始符", vec![0x68], "68H".to_string()));
+
+    // 长度 L（2字节，小端）
+    let frame_len = u16::from_le_bytes([raw_bytes[1], raw_bytes[2]]);
+    fields.push(leaf(
+        "长度",
+        raw_bytes[1..3].to_vec(),
+        format!("长度={} 字节", frame_len),
+    ));
 
     // 控制字（展开位域）
     fields.push(control_byte_node(&msg.frame.control));
@@ -117,7 +126,7 @@ pub fn render_message_as_value(msg: &Message, protocol: &str, region: &str) -> R
     // 返回根节点
     Ok(Value::Node {
         name: "Q/CSG1209021-2019 报文".to_string(),
-        raw: vec![], // 完整原始字节由调用者决定是否填充
+        raw: raw_bytes,
         value: Box::new(Value::List(fields)),
     })
 }
@@ -329,6 +338,39 @@ mod tests {
                 assert_eq!(name, "Q/CSG1209021-2019 报文");
             }
             _ => panic!("Expected Node"),
+        }
+    }
+
+    #[test]
+    fn test_render_includes_frame_length_before_control() {
+        let frame = Frame {
+            control: ControlByte::uplink_response_with_address(),
+            address: None,
+            payload: vec![0x00, 0x01, 0xE8, 0x01, 0x00, 0x01],
+        };
+        let app = ApplicationLayer {
+            afn: Afn::AckNack,
+            seq: 0x01,
+            di: DataIdentifier::ack(NodeRole::Concentrator),
+            body: ApplicationBody::Ack,
+        };
+
+        let tree = render_message_as_value(&Message { frame, app }, "csg13", "南网").unwrap();
+        match tree {
+            Value::Node { value, .. } => match value.as_ref() {
+                Value::List(fields) => {
+                    assert!(matches!(
+                        &fields[1],
+                        Value::Node { name, raw, .. } if name == "长度" && raw == &vec![0x0C, 0x00]
+                    ));
+                    assert!(matches!(
+                        &fields[2],
+                        Value::Node { name, .. } if name == "控制字"
+                    ));
+                }
+                _ => panic!("Expected root node with field list"),
+            },
+            _ => panic!("Expected root node with field list"),
         }
     }
 
