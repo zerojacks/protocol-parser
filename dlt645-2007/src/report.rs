@@ -286,7 +286,7 @@ fn application_body_node(body: &ApplicationBody, _raw: &[u8], protocol: &str, re
         ApplicationBody::ReadResponse { items } => {
             let mut rows = Vec::new();
             for (i, item) in items.iter().enumerate() {
-                rows.push(data_item_node(i + 1, item));
+                rows.push(data_item_node(i + 1, item, protocol, region));
             }
             Value::List(rows)
         }
@@ -342,18 +342,35 @@ fn application_body_node(body: &ApplicationBody, _raw: &[u8], protocol: &str, re
     }
 }
 
-/// 数据项节点：直接展示解析结果，去掉中间层级
-fn data_item_node(index: usize, item: &DataItem) -> Value {
-    // 如果有 spec-engine 解析结果，直接返回
-    if let Some(ref parsed) = item.parsed_value {
+/// 数据项节点：展示数据标识编码及其对应的数据内容
+fn data_item_node(index: usize, item: &DataItem, protocol: &str, region: &str) -> Value {
+    let identifier_raw = item.identifier.as_bytes().to_vec();
+    let mut raw = identifier_raw.clone();
+    raw.extend_from_slice(&item.raw_data);
+
+    let di_hex = format!("{:08X}", item.identifier.to_u32());
+    let identifier_desc = if let Ok(di_name) = lookup_di_name(protocol, region, &di_hex, Some("1")) {
+        format!("DI={:08X}H ({})", item.identifier.to_u32(), di_name)
+    } else {
+        format!("DI={:08X}H", item.identifier.to_u32())
+    };
+    let content = if let Some(ref parsed) = item.parsed_value {
         parsed.clone()
     } else {
-        // 没有解析结果，显示原始数据
-        Value::Node {
-            name: format!("数据项 {} (DI={:08X}H)", index, item.identifier.to_u32()),
-            raw: item.raw_data.clone(),
-            value: Box::new(Value::Str(format!("未解析 ({} 字节)", item.raw_data.len()))),
-        }
+        Value::Str(format!("未解析 ({} 字节)", item.raw_data.len()))
+    };
+
+    Value::Node {
+        name: format!("数据项 {}", index),
+        raw,
+        value: Box::new(Value::List(vec![
+            leaf("数据标识", identifier_raw, identifier_desc),
+            Value::Node {
+                name: "数据内容".to_string(),
+                raw: item.raw_data.clone(),
+                value: Box::new(content),
+            },
+        ])),
     }
 }
 
